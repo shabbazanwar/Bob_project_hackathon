@@ -101,7 +101,7 @@ async function runSpecialist(
   specialist: Specialist,
   diff: string
 ): Promise<Finding[]> {
-  let lastError: unknown;
+  let lastError: RateLimitError | undefined;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -149,7 +149,8 @@ async function runSpecialist(
   }
 
   // All retries exhausted on rate-limit errors.
-  throw new Error("rate_limited");
+  const cause = lastError?.message ?? "rate limit exceeded";
+  throw Object.assign(new Error("rate_limited"), { cause });
 }
 
 export async function POST(req: NextRequest) {
@@ -210,6 +211,8 @@ export async function POST(req: NextRequest) {
       );
     }
     if (err instanceof Error && err.message === "rate_limited") {
+      const cause = (err as Error & { cause?: string }).cause;
+      console.error("[review] Rate limit retries exhausted:", cause);
       return NextResponse.json(
         {
           error:
