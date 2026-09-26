@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI, { RateLimitError } from "openai";
+import OpenAI, { BadRequestError, RateLimitError } from "openai";
 
 export type Specialist = "security" | "correctness" | "maintainability";
 
@@ -135,6 +135,20 @@ async function runSpecialist(
 
       return items.map((item) => ({ ...item, specialist }));
     } catch (err) {
+      // Groq returns 400 "failed_generation" when the model produces no valid
+      // JSON (typically because there are no findings to report).  Treat this
+      // as an empty result for this specialist rather than a hard failure.
+      if (
+        err instanceof BadRequestError &&
+        typeof err.message === "string" &&
+        err.message.includes("failed_generation")
+      ) {
+        console.warn(
+          `[review/${specialist}] Groq failed_generation (likely empty output) — returning [].`
+        );
+        return [];
+      }
+
       // Non-retryable errors — re-throw immediately.
       if (!(err instanceof RateLimitError)) throw err;
 
@@ -221,9 +235,9 @@ export async function POST(req: NextRequest) {
         { status: 429 }
       );
     }
-    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[review] Unhandled inference error:", err);
     return NextResponse.json(
-      { error: `Inference request failed: ${message}` },
+      { error: "An unexpected error occurred while reviewing. Please try again." },
       { status: 502 }
     );
   }
